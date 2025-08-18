@@ -84,10 +84,6 @@ def find_and_renew_instances(session):
    
     manage_buttons = soup.find_all('a', class_='btn-primary')
     
-    for btn in manage_buttons:
-        print(f"处理实例: href={btn['href']} text={btn.text}")
-        print(btn['href'], btn.text)
-
     if not manage_buttons:
         print("没有找到任何服务器实例")
         return
@@ -97,7 +93,7 @@ def find_and_renew_instances(session):
         href = btn['href']
         instance_id = href.split("/")[-2]
         instance_name = btn.text.strip() or "未命名实例"
-        print(f"处理实例: 名称={instance_name} ID={instance_id}")
+        print(f"处理实例:  ID={instance_id}")
         
         detail_response = session.get(f"https://vps.polarbear.nyc.mn{href}", proxies={"http": PROXY, "https": PROXY})
         detail_soup = BeautifulSoup(detail_response.text, 'html.parser')
@@ -109,6 +105,14 @@ def find_and_renew_instances(session):
                 submit_button = detail_soup.find('input', class_='btn-success')
                 # 假设提交续期
                 submit_response = session.post(f"https://vps.polarbear.nyc.mn{renew_button['href']}", proxies={"http": PROXY, "https": PROXY})
+
+
+                submit_soup = BeautifulSoup(submit_response.text, 'html.parser')
+
+
+                instance_name_info= detail_soup.find(text=re.compile("产品名称"))
+                if instance_name_info:
+                   instance_name= instance_name_info.strip()
                 print(f"✅ 续期成功，实例：{instance_name}")
 
                 expiration_text = " ❌ 未找到到期时间信息"
