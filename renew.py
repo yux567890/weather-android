@@ -69,6 +69,7 @@ def find_and_renew_instances(session):
     response = session.get(CONTROL_INDEX_URL, proxies={"http": PROXY, "https": PROXY})
     soup = BeautifulSoup(response.text, 'html.parser')
     
+    print("页面内容:\n" + soup.prettify())  # 打印格式化后的 HTML
     manage_buttons = soup.find_all('a', class_='btn btn-primary', href=lambda href: href and '/control/detail/' in href)
     if not manage_buttons:
         print("没有找到任何服务器实例")
