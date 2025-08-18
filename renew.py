@@ -12,7 +12,7 @@ TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 PROXY = os.environ.get("SOCKS5_PROXY")  # 设置代理
 
 
-LOGIN_URL = "https://vps.polarbear.nyc.mn/index/login/?referer="
+LOGIN_URL = "https://vps.polarbear.nyc.mn/index/login/?referer=%2Fcontrol%2Findex%2F"
 CONTROL_INDEX_URL = "https://vps.polarbear.nyc.mn/control/index/"
 
 
@@ -51,6 +51,10 @@ def login_and_get_session():
         "swapname": USERNAME,
         "swappass": PASSWORD,
     }
+
+    if not USERNAME or not PASSWORD:
+        print("账号密码不全！退出脚本！")
+        exit()
     
     response = session.post(LOGIN_URL, data=payload, proxies=proxies)
     if response.ok:
