@@ -41,7 +41,14 @@ def send_telegram(title, content):
         print(f"Telegram 推送异常: {e}")
 
 def login_and_get_session():
-    session = requests.Session()
+    session = requests.Session(impersonate="chrome110")
+    try:
+        session.get(LOGIN_URL, proxies=proxies)
+    except Exception as e:
+        print(f"登录页访问失败: {e}")
+        return None
+
+
     proxies = {
         "http": PROXY,
         "https": PROXY,
@@ -52,21 +59,30 @@ def login_and_get_session():
         "swappass": PASSWORD,
     }
 
+     headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0.0.0 Safari/537.36",
+        'origin': "https://vps.polarbear.nyc.mn/",
+        'referer': LOGIN_URL,
+    }
+
     if not USERNAME or not PASSWORD:
         print("账号密码不全！退出脚本！")
         exit()
     
-    response = session.post(LOGIN_URL, data=payload, proxies=proxies)
-    if response.ok:
-        print(f"账号 {USERNAME} ✅ 登录成功")
+    response = session.post(LOGIN_URL, data=payload, headers=headers, proxies=proxies, timeout=60)
+    if response.status_code == 200 and ('欢迎回来' in response.text or '退出登录' in response.text):
+        print(f"✅ 登录成功")
         return session
-    else:
-        raise ValueError("登录失败，请检查用户名和密码")
-        print(f"账号 {USERNAME} ❌ 登录失败")
+    print("❌ 登录失败")    
+    except Exception as e:
+        print("登录异常:", e)
+    return None
 
 def find_and_renew_instances(session):
     print("查找 VPS 实例列表...")
     response = session.get(CONTROL_INDEX_URL, proxies={"http": PROXY, "https": PROXY})
+    
+    print("页面返回:\n" + response.text)  # 打印格式化后的 HTML
     soup = BeautifulSoup(response.text, 'html.parser')
     
     print("页面内容:\n" + soup.prettify())  # 打印格式化后的 HTML
