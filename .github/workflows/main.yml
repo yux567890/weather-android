@@ -26,9 +26,10 @@ jobs:
           pip install curl_cffi --upgrade
       - name: Run renew.py
         env:
-          ArcticCloud_CONFIG: ${{ secrets.ArcticCloud_CONFIG }}
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
         run: |
           python renew.py
