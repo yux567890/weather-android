@@ -42,17 +42,11 @@ def send_telegram(title, content):
 
 def login_and_get_session():
     session = requests.Session(impersonate="chrome110")
-    try:
-        session.get(LOGIN_URL, proxies=proxies)
-    except Exception as e:
-        print(f"登录页访问失败: {e}")
-        return None
-
     proxies = {
         "http": PROXY,
         "https": PROXY,
     } if PROXY else {}
-    
+
     payload = {
         "swapname": USERNAME,
         "swappass": PASSWORD,
