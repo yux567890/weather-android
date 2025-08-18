@@ -82,7 +82,7 @@ def find_and_renew_instances(session):
     soup = BeautifulSoup(response.text, 'html.parser')
     
     print("页面内容:\n" + soup.prettify())  # 打印格式化后的 HTML
-    manage_buttons = soup.find_all('a', class_='btn btn-primary', href=lambda href: href and '/control/detail/' in href)
+    manage_buttons = soup.find_all('a', class_='btn btn-primary')
     
     for btn in manage_buttons:
         print(btn['href'], btn.text)
