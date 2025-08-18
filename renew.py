@@ -48,7 +48,6 @@ def login_and_get_session():
         print(f"登录页访问失败: {e}")
         return None
 
-
     proxies = {
         "http": PROXY,
         "https": PROXY,
@@ -74,9 +73,7 @@ def login_and_get_session():
         print(f"✅ 登录成功")
         return session
     print("❌ 登录失败")    
-    except Exception as e:
-        print("登录异常:", e)
-    return None
+    return None  
 
 def find_and_renew_instances(session):
     print("查找 VPS 实例列表...")
