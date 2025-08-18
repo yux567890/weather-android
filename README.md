@@ -22,32 +22,15 @@
 
 | 变量名 | 是否必填 | 用途说明 |
 |--------|----------|-----------|
-| `ArcticCloud_CONFIG` | ✅ 必填 | VPS 登录账号密码及续期 ID 配置（详见下方示例） |
+| `ARCTIC_USERNAME` | ✅ 必填 | VPS 登录账号 |
+| `ARCTIC_PASSWORD` | ✅ 必填 | VPS 登录密码 |
 | `TELEGRAM_BOT_TOKEN` | ✅ 推荐 | 用于发送 Telegram 通知的 Bot Token |
-| `CHAT_ID` | ✅ 推荐 | Telegram 你的账号或频道的 chat_id |
+| `TG_CHAT_ID` | ✅ 推荐 | Telegram 你的账号或频道的 chat_id |
 | `SOCKS5_PROXY` | ✅ 推荐 | 使用 SOCKS5 代理访问网站（格式见下） |
 
 ---
 
-### 🧩 ArcticCloud_CONFIG 示例
 
-```json
-{
-  "username": "your_account_email_or_username",
-  "password": "your_password",
-  "VPS": {
-    "DE-Frankfurt": 122,
-    "UK-Portsmouth": 123,
-    "US-Dallas": 123
-
-  }
-}
-
-```
-
-其中 122 和 123 是每台 VPS 的续期链接中对应的 ID，例如:
-
-https://vps.polarbear.nyc.mn/control/detail/122/
 
 ---
 
@@ -62,7 +45,7 @@ socks5://用户:密码@ip:端口
 2. 向你自己的 Telegram 发送一条消息，然后访问以下链接（将 `<你的TOKEN>` 替换为你的 Bot Token）：  
    https://api.telegram.org/bot<你的TOKEN>/getUpdates  
    打开后即可查看并获取你的 `chat_id`。  
-3. 将 `TELEGRAM_BOT_TOKEN` 和 `CHAT_ID` 添加到 GitHub 仓库的 Secrets 中。
+3. 将 `TELEGRAM_BOT_TOKEN` 和 `TG_CHAT_ID` 添加到 GitHub 仓库的 Secrets 中。
 
 ---
 
