@@ -1,0 +1,33 @@
+name: renew vps and send message to tg
+
+on:
+  workflow_dispatch:  # 允许手动触发 
+  schedule:
+    - cron: '37 4 */3 * *'  # 每隔 3 天的早上 4 点 37 分执行,北京时间 12:37
+  push:
+    branches:
+      - main  # 或其他你希望触发的分支（加上这个玩意就会邮件提醒你脚本执行了）
+jobs:
+  send_message:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'  # 使用合适的 Python 版本
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+          pip install curl_cffi --upgrade
+      - name: Run renew.py
+        env:
+          ArcticCloud_CONFIG: ${{ secrets.ArcticCloud_CONFIG }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          SOCKS5_PROXY: ${{ secrets.SOCKS5_PROXY }}
+        run: |
+          python renew.py
