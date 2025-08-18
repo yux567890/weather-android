@@ -83,6 +83,10 @@ def find_and_renew_instances(session):
     
     print("页面内容:\n" + soup.prettify())  # 打印格式化后的 HTML
     manage_buttons = soup.find_all('a', class_='btn btn-primary', href=lambda href: href and '/control/detail/' in href)
+    
+    for btn in manage_buttons:
+        print(btn['href'], btn.text)
+
     if not manage_buttons:
         print("没有找到任何服务器实例")
         return
