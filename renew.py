@@ -80,7 +80,12 @@ def login_and_get_session():
 
 def find_and_renew_instances(session):
     print("查找 VPS 实例列表...")
-    response = session.get(CONTROL_INDEX_URL, proxies={"http": PROXY, "https": PROXY})
+    
+    proxies = {
+        "http": PROXY,
+        "https": PROXY,
+    } if PROXY else {}
+    response = session.get(CONTROL_INDEX_URL,  proxies=proxies, timeout=60)
     
     print("页面返回:\n" + response.text)  # 打印格式化后的 HTML
     soup = BeautifulSoup(response.text, 'html.parser')
