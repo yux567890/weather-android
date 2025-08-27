@@ -193,13 +193,13 @@ def login_to_arcticcloud(login_url, username, password):
 
 def get_product_list_from_page(session):
     """
-    从产品列表页面获取产品ID，然后访问每个产品的管理界面获取详细信息
+    从产品列表页面获取产品ID和管理URL，产品名称在续期时从管理界面获取
     
     Args:
         session (requests.Session): 已登录的会话对象
     
     Returns:
-        list: 产品信息列表，每个元素包含 id、name、manage_url、expiry_date
+        list: 产品信息列表，每个元素包含 id、manage_url
     """
     print(f"📋 获取产品列表: {PRODUCT_LIST_URL}")
     
@@ -215,10 +215,39 @@ def get_product_list_from_page(session):
         # 解析 HTML 内容
         html_content = response.text
         
-        # 使用正则表达式匹配所有管理链接
-        # 匹配模式: /control/detail/{product_id}/
-        manage_link_pattern = r'/control/detail/(\d+)/?["\'>]'
-        product_ids = re.findall(manage_link_pattern, html_content)
+        # 使用更精确的方式获取管理按钮
+        # 查找包含 class="btn btn-primary" 且 href 包含 /control/detail 的按钮
+        print("🔍 搜索管理按钮: class='btn btn-primary' 且 href 包含 '/control/detail'")
+        
+        # 匹配模式: <a class="btn btn-primary" href="/control/detail/{product_id}/">或类似格式
+        # 支持 btn 和 btn-primary 的任意顺序
+        manage_button_pattern = r'<a[^>]*class=["\'][^"\'>]*(?:btn[^"\'>]*btn-primary|btn-primary[^"\'>]*btn)[^"\'>]*["\'][^>]*href=["\']([^"\'>]*control/detail/(\d+)[^"\'>]*)["\'][^>]*>'
+        matches = re.finditer(manage_button_pattern, html_content, re.IGNORECASE)
+        
+        product_ids = []
+        manage_urls = []
+        
+        for match in matches:
+            full_href = match.group(1)
+            product_id = match.group(2)
+            product_ids.append(product_id)
+            manage_urls.append(full_href)
+            print(f"✅ 找到管理按钮: 产品ID {product_id}, URL: {full_href}")
+        
+        if not product_ids:
+            print("❌ 未找到任何符合条件的管理按钮")
+            print("🔍 尝试备用方案: 查找任何包含 /control/detail 的链接")
+            
+            # 备用方案: 查找任何包含 /control/detail 的链接
+            fallback_pattern = r'href=["\']([^"\'>]*control/detail/(\d+)[^"\'>]*)["\']'
+            fallback_matches = re.finditer(fallback_pattern, html_content, re.IGNORECASE)
+            
+            for match in fallback_matches:
+                full_href = match.group(1)
+                product_id = match.group(2)
+                product_ids.append(product_id)
+                manage_urls.append(full_href)
+                print(f"⚠️ 备用方案找到: 产品ID {product_id}, URL: {full_href}")
         
         if not product_ids:
             print("❌ 未在页面中找到任何产品管理链接")
@@ -228,29 +257,32 @@ def get_product_list_from_page(session):
         unique_product_ids = list(set(product_ids))
         print(f"🔍 找到 {len(unique_product_ids)} 个唯一产品 ID: {unique_product_ids}")
         
+        # 创建产品ID到管理URL的映射
+        product_url_map = {}
+        for i, product_id in enumerate(product_ids):
+            if product_id not in product_url_map:
+                # 确保 URL 是完整的
+                full_url = manage_urls[i]
+                if not full_url.startswith('http'):
+                    full_url = BASE_URL + ('' if full_url.startswith('/') else '/') + full_url
+                product_url_map[product_id] = full_url
+        
         products = []
         
-        # 访问每个产品的管理界面获取详细信息
+        # 为每个产品创建基本信息，产品名称在续期时获取
         for product_id in unique_product_ids:
-            print(f"\n🔄 正在获取产品 {product_id} 的详细信息...")
-            product_info = _get_product_details_from_manage_page(session, product_id)
-            if product_info:
-                products.append(product_info)
-            else:
-                # 如果无法从管理界面获取，则使用默认信息
-                default_product = {
-                    'id': product_id,
-                    'name': f'VPS_{product_id}',
-                    'manage_url': f'{BASE_URL}/control/detail/{product_id}/',
-                    'expiry_date': None
-                }
-                products.append(default_product)
-                print(f"⚠️ 使用默认信息: {default_product['name']}")
+            manage_url = product_url_map.get(product_id, f'{BASE_URL}/control/detail/{product_id}/')
+            product_info = {
+                'id': product_id,
+                'name': f'VPS_{product_id}',  # 临时名称，在续期时会更新
+                'manage_url': manage_url,
+                'expiry_date': None  # 在续期时获取
+            }
+            products.append(product_info)
         
-        print(f"\n🎉 最终获取到 {len(products)} 个产品:")
+        print(f"\n🎉 最终获取到 {len(products)} 个产品（详细信息将在续期时获取）:")
         for product in products:
-            expiry_info = f" (到期: {product['expiry_date']})" if product['expiry_date'] else " (到期时间未知)"
-            print(f"   • {product['name']} (ID: {product['id']}){expiry_info}")
+            print(f"   • 产品ID: {product['id']}, 管理URL: {product['manage_url']}")
         
         return products
         
@@ -260,49 +292,7 @@ def get_product_list_from_page(session):
 
 
 
-def _get_product_details_from_manage_page(session, product_id):
-    """
-    从产品管理界面获取产品详细信息（产品名称和到期时间）
-    
-    Args:
-        session (requests.Session): 已登录的会话对象
-        product_id (str): 产品 ID
-    
-    Returns:
-        dict: 产品信息字典，包含 id、name、manage_url、expiry_date，失败返回 None
-    """
-    manage_url = f'{BASE_URL}/control/detail/{product_id}/'
-    
-    try:
-        print(f"🌐 访问管理界面: {manage_url}")
-        response = session.get(manage_url, proxies=proxy_config, timeout=60)
-        
-        if response.status_code != 200:
-            print(f"❌ 访问管理界面失败: HTTP {response.status_code}")
-            return None
-        
-        html_content = response.text
-        
-        # 从管理界面提取产品名称
-        product_name = _extract_product_name_from_manage_page(html_content, product_id)
-        
-        # 从管理界面提取到期时间
-        expiry_date = _extract_expiry_from_manage_page(html_content)
-        
-        product_info = {
-            'id': product_id,
-            'name': product_name,
-            'manage_url': manage_url,
-            'expiry_date': expiry_date
-        }
-        
-        print(f"✅ 成功获取产品信息: {product_name}, 到期: {expiry_date or '未知'}")
-        return product_info
-        
-    except Exception as error:
-        print(f"❌ 获取产品 {product_id} 管理界面信息失败: {error}")
-        return None
-
+# 原 _get_product_details_from_manage_page 函数已移除，因为现在在续期时直接获取产品信息
 
 def _extract_product_name_from_manage_page(html_content, product_id):
     """
@@ -827,7 +817,7 @@ def renew_product(session, product):
     对单个产品进行续期操作
     
     优化说明：
-    - 产品名称和到期时间都从管理界面获取
+    - 直接从续期按钮界面（管理界面）获取产品名称和到期时间
     - 续期后重新从管理界面获取更新的到期时间
     - 增强日志输出和错误处理
     
@@ -841,33 +831,65 @@ def renew_product(session, product):
     import time
     
     try:
-        print(f"🔄 开始续期: {product['name']} (ID: {product['id']})")
-        print(f"📎 产品管理页面: {BASE_URL}/control/detail/{product['id']}/")
+        product_id = product['id']
+        manage_url = product.get('manage_url', f"{BASE_URL}/control/detail/{product_id}/")
         
-        # 使用从管理界面获取的到期时间作为续期前的时间
-        old_expiry = product.get('expiry_date')
-        if old_expiry:
-            print(f"📅 续期前到期时间: {old_expiry} (数据来源: 产品管理界面)")
-        else:
-            print("⚠️ 未获取到续期前的到期时间")
+        print(f"🔄 开始续期操作: 产品 ID {product_id}")
+        print(f"📎 产品管理页面: {manage_url}")
         
-        # 执行续期操作
-        pay_url = f"{BASE_URL}/control/detail/{product['id']}/pay/"
+        # 步骤 1: 从续期按钮界面（管理界面）获取准确的产品名称和到期时间
+        print(f"🔍 步骤 1: 从续期按钮界面获取产品信息...")
+        
+        try:
+            response = session.get(manage_url, proxies=proxy_config, timeout=60)
+            if response.status_code == 200:
+                html_content = response.text
+                
+                # 从管理界面获取准确的产品名称
+                actual_product_name = _extract_product_name_from_manage_page(html_content, product_id)
+                
+                # 从管理界面获取到期时间
+                old_expiry = _extract_expiry_from_manage_page(html_content)
+                
+                print(f"✅ 从续期按钮界面获取到:")
+                print(f"    产品名称: {actual_product_name}")
+                print(f"    到期时间: {old_expiry or '未知'}")
+                
+                # 更新产品信息
+                product['name'] = actual_product_name
+                product['expiry_date'] = old_expiry
+                
+            else:
+                print(f"⚠️ 无法访问管理界面: HTTP {response.status_code}")
+                print(f"⚠️ 使用原有产品信息进行续期")
+                actual_product_name = product.get('name', f'VPS_{product_id}')
+                old_expiry = product.get('expiry_date')
+                
+        except Exception as e:
+            print(f"⚠️ 获取管理界面信息失败: {e}")
+            print(f"⚠️ 使用原有产品信息进行续期")
+            actual_product_name = product.get('name', f'VPS_{product_id}')
+            old_expiry = product.get('expiry_date')
+        
+        print(f"\n🔄 步骤 2: 开始续期操作 - {actual_product_name}")
+        
+        # 步骤 3: 执行续期操作
+        pay_url = f"{BASE_URL}/control/detail/{product_id}/pay/"
         print(f"💳 执行续期请求: {pay_url}")
         
         renew_response = session.post(pay_url, timeout=120, proxies=proxy_config)
         
         if renew_response.status_code == 200 and "免费产品已经帮您续期到当前时间的最大续期时间" in renew_response.text:
-            print(f"✅ {product['name']} 续期操作成功")
-            print(f"🔄 即将从管理界面获取更新后的到期时间...")
+            print(f"✅ {actual_product_name} 续期操作成功")
+            print(f"🔄 步骤 4: 获取续期后的更新信息...")
             
             # 续期成功后，重新从产品管理界面获取更新后的到期时间
-            new_expiry = _get_updated_expiry_from_manage_page(session, product['id'], old_expiry)
+            new_expiry = _get_updated_expiry_from_manage_page(session, product_id, old_expiry)
             
             return {'success': True, 'expiry_date': new_expiry}
             
         else:
-            print(f"❌ {product['name']} 续期操作失败: 状态码 {renew_response.status_code}")
+            print(f"❌ {actual_product_name} 续期操作失败: 状态码 {renew_response.status_code}")
             if renew_response.status_code == 200:
                 print(f"🗎 响应内容片段: {renew_response.text[:200]}...")
             elif renew_response.status_code == 403:
@@ -878,7 +900,8 @@ def renew_product(session, product):
             return {'success': False, 'expiry_date': old_expiry}
             
     except Exception as e:
-        print(f"❌ {product['name']} 续期请求异常: {e}")
+        actual_product_name = product.get('name', f'VPS_{product.get("id", "unknown")}')
+        print(f"❌ {actual_product_name} 续期请求异常: {e}")
         if "timeout" in str(e).lower():
             print("⏰ 请求超时，可能是网络问题")
         elif "connection" in str(e).lower():
