@@ -193,7 +193,7 @@ def login_to_arcticcloud(login_url, username, password):
 
 def get_product_list_from_page(session):
     """
-    从产品列表页面获取所有 VPS 产品信息，包括产品名称和到期时间
+    从产品列表页面获取产品ID，然后访问每个产品的管理界面获取详细信息
     
     Args:
         session (requests.Session): 已登录的会话对象
@@ -201,7 +201,7 @@ def get_product_list_from_page(session):
     Returns:
         list: 产品信息列表，每个元素包含 id、name、manage_url、expiry_date
     """
-    print(f"📋 获取产品列表和到期时间: {PRODUCT_LIST_URL}")
+    print(f"📋 获取产品列表: {PRODUCT_LIST_URL}")
     
     try:
         response = session.get(PRODUCT_LIST_URL, proxies=proxy_config, timeout=60)
@@ -214,7 +214,6 @@ def get_product_list_from_page(session):
         
         # 解析 HTML 内容
         html_content = response.text
-        products = []
         
         # 使用正则表达式匹配所有管理链接
         # 匹配模式: /control/detail/{product_id}/
@@ -225,35 +224,261 @@ def get_product_list_from_page(session):
             print("❌ 未在页面中找到任何产品管理链接")
             return []
         
-        print(f"🔍 找到 {len(product_ids)} 个产品 ID: {product_ids}")
+        # 去重产品ID
+        unique_product_ids = list(set(product_ids))
+        print(f"🔍 找到 {len(unique_product_ids)} 个唯一产品 ID: {unique_product_ids}")
         
-        # 为每个产品 ID 提取产品名称和到期时间
-        for product_id in product_ids:
-            product_name = _extract_product_name(html_content, product_id)
-            expiry_date = _extract_expiry_from_list_page(html_content, product_id)
-            
-            product_info = {
-                'id': product_id,
-                'name': product_name,
-                'manage_url': f'{BASE_URL}/control/detail/{product_id}/',
-                'expiry_date': expiry_date
-            }
-            
-            products.append(product_info)
+        products = []
         
-        # 去重处理（根据产品 ID）
-        unique_products = _remove_duplicate_products(products)
+        # 访问每个产品的管理界面获取详细信息
+        for product_id in unique_product_ids:
+            print(f"\n🔄 正在获取产品 {product_id} 的详细信息...")
+            product_info = _get_product_details_from_manage_page(session, product_id)
+            if product_info:
+                products.append(product_info)
+            else:
+                # 如果无法从管理界面获取，则使用默认信息
+                default_product = {
+                    'id': product_id,
+                    'name': f'VPS_{product_id}',
+                    'manage_url': f'{BASE_URL}/control/detail/{product_id}/',
+                    'expiry_date': None
+                }
+                products.append(default_product)
+                print(f"⚠️ 使用默认信息: {default_product['name']}")
         
-        print(f"🎉 最终获取到 {len(unique_products)} 个唯一产品:")
-        for product in unique_products:
+        print(f"\n🎉 最终获取到 {len(products)} 个产品:")
+        for product in products:
             expiry_info = f" (到期: {product['expiry_date']})" if product['expiry_date'] else " (到期时间未知)"
             print(f"   • {product['name']} (ID: {product['id']}){expiry_info}")
         
-        return unique_products
+        return products
         
     except Exception as error:
         print(f"❌ 解析产品列表失败: {error}")
         return []
+
+
+
+def _get_product_details_from_manage_page(session, product_id):
+    """
+    从产品管理界面获取产品详细信息（产品名称和到期时间）
+    
+    Args:
+        session (requests.Session): 已登录的会话对象
+        product_id (str): 产品 ID
+    
+    Returns:
+        dict: 产品信息字典，包含 id、name、manage_url、expiry_date，失败返回 None
+    """
+    manage_url = f'{BASE_URL}/control/detail/{product_id}/'
+    
+    try:
+        print(f"🌐 访问管理界面: {manage_url}")
+        response = session.get(manage_url, proxies=proxy_config, timeout=60)
+        
+        if response.status_code != 200:
+            print(f"❌ 访问管理界面失败: HTTP {response.status_code}")
+            return None
+        
+        html_content = response.text
+        
+        # 从管理界面提取产品名称
+        product_name = _extract_product_name_from_manage_page(html_content, product_id)
+        
+        # 从管理界面提取到期时间
+        expiry_date = _extract_expiry_from_manage_page(html_content)
+        
+        product_info = {
+            'id': product_id,
+            'name': product_name,
+            'manage_url': manage_url,
+            'expiry_date': expiry_date
+        }
+        
+        print(f"✅ 成功获取产品信息: {product_name}, 到期: {expiry_date or '未知'}")
+        return product_info
+        
+    except Exception as error:
+        print(f"❌ 获取产品 {product_id} 管理界面信息失败: {error}")
+        return None
+
+
+def _extract_product_name_from_manage_page(html_content, product_id):
+    """
+    从产品管理界面提取产品名称
+    
+    Args:
+        html_content (str): 管理界面的 HTML 内容
+        product_id (str): 产品 ID
+    
+    Returns:
+        str: 产品名称
+    """
+    default_name = f'VPS_{product_id}'
+    
+    try:
+        # 在管理界面中尝试多种模式来匹配产品名称
+        name_patterns = [
+            # 模式 1: 匹配页面标题中的产品名称
+            r'<title[^>]*>([^<]*(?:产品|服务器|主机|VPS)[^<]*)</title>',
+            r'<title[^>]*>([^<]*)</title>',
+            
+            # 模式 2: 匹配 h1, h2, h3 标题中的产品名称
+            r'<h[1-3][^>]*>([^<]*[一-鿿][^<]*)</h[1-3]>',
+            r'<h[1-3][^>]*>([^<]+?)</h[1-3]>',
+            
+            # 模式 3: 匹配包含“产品名称”、“服务器名称”等关键词的内容
+            r'(?:产品名称|服务器名称|主机名称|VPS名称)[^:]*[:]：]?\s*([^<\r\n]+)',
+            
+            # 模式 4: 匹配 class 包含 name、title、product 的标签
+            r'<[^>]+class=["\'][^"\'>]*(?:name|title|product)[^"\'>]*["\'][^>]*>\s*([^<]+?)\s*</[^>]+>',
+            
+            # 模式 5: 匹配强调标签中的产品名称
+            r'<(?:strong|b)[^>]*>\s*([^<]*[一-鿿][^<]*)\s*</(?:strong|b)>',
+            r'<(?:strong|b)[^>]*>\s*([^<]+?)\s*</(?:strong|b)>',
+            
+            # 模式 6: 在表格中查找产品相关信息
+            r'<td[^>]*>\s*([^<]*[一-鿿][^<]*)\s*</td>',
+            r'<td[^>]*>\s*([^<]+?)\s*</td>',
+        ]
+        
+        candidates = []
+        
+        for pattern_index, pattern in enumerate(name_patterns, 1):
+            matches = re.finditer(pattern, html_content, re.IGNORECASE | re.DOTALL)
+            
+            for match in matches:
+                potential_name = match.group(1).strip()
+                
+                # 验证产品名称的有效性
+                if _is_valid_product_name_for_manage_page(potential_name):
+                    candidates.append((potential_name, pattern_index))
+        
+        if candidates:
+            # 优先选择包含中文的名称
+            chinese_candidates = [c for c in candidates if re.search(r'[一-鿿]', c[0])]
+            if chinese_candidates:
+                best_name, best_pattern = chinese_candidates[0]
+                print(f"🎯 从管理界面使用模式 {best_pattern} 提取到产品名称 (中文优先): {best_name}")
+                return best_name
+            
+            # 其次选择不像域名且长度较长的名称
+            non_domain_candidates = [c for c in candidates if not _looks_like_domain(c[0])]
+            if non_domain_candidates:
+                best_name, best_pattern = max(non_domain_candidates, key=lambda x: len(x[0]))
+                print(f"🎯 从管理界面使用模式 {best_pattern} 提取到产品名称 (非域名优先): {best_name}")
+                return best_name
+            
+            # 最后选择第一个候选名称
+            best_name, best_pattern = candidates[0]
+            print(f"🎯 从管理界面使用模式 {best_pattern} 提取到产品名称 (备用): {best_name}")
+            return best_name
+        
+        print(f"⚠️ 未能从管理界面提取产品 {product_id} 的有效名称，使用默认名称")
+        return default_name
+        
+    except Exception as error:
+        print(f"⚠️ 从管理界面提取产品 {product_id} 名称失败: {error}")
+        return default_name
+
+
+def _is_valid_product_name_for_manage_page(name):
+    """
+    验证从管理界面提取的产品名称是否有效（相比列表页面更宽松）
+    
+    Args:
+        name (str): 待验证的产品名称
+    
+    Returns:
+        bool: 是否为有效的产品名称
+    """
+    if not name or len(name) < 2 or len(name) > 200:
+        return False
+    
+    # 过滤空白字符
+    if re.match(r'^\s*$', name):
+        return False
+    
+    # 过滤明显的域名格式
+    if _looks_like_domain(name):
+        return False
+    
+    # 过滤包含HTML标签的内容
+    if '<' in name and '>' in name:
+        return False
+    
+    # 过滤纠明显不是产品名称的关键词（管理界面相对宽松）
+    invalid_keywords = [
+        'control', 'detail', 'manage', 'admin', 'panel',
+        'login', 'logout', 'sign', 'register',
+        'http', 'https', 'www', 'html', 'css', 'js',
+        'error', 'success', 'fail', 'warning'
+    ]
+    
+    name_lower = name.lower()
+    for keyword in invalid_keywords:
+        if keyword in name_lower:
+            return False
+    
+    # 过滤纯数字或纯特殊字符
+    if name.isdigit() or re.match(r'^[^a-zA-Z\u4e00-\u9fff]+$', name):
+        return False
+    
+    # 对于管理界面，接受更多类型的名称
+    return True
+
+
+def _extract_expiry_from_manage_page(html_content):
+    """
+    从产品管理界面提取到期时间
+    
+    Args:
+        html_content (str): 管理界面的 HTML 内容
+    
+    Returns:
+        str: 到期时间，如果未找到则返回 None
+    """
+    try:
+        # 定义多种到期时间匹配模式，针对管理界面优化
+        expiry_patterns = [
+            # 模式 1: 中文日期描述
+            r'(?:到期时间|过期时间|有效期至|截止时间)[^0-9]*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[\s]+[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2})?)',
+            
+            # 模式 2: 英文日期描述
+            r'(?:Expiry|expiry|Expires|expires|Valid\s+until|valid\s+until)[^0-9]*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[\s]+[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2})?)',
+            
+            # 模式 3: 在表格中查找日期格式
+            r'<td[^>]*>\s*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[\s]+[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2})?)\s*</td>',
+            
+            # 模式 4: 在span或div中查找日期
+            r'<(?:span|div)[^>]*>\s*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[\s]+[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2})?)\s*</(?:span|div)>',
+            
+            # 模式 5: 任意日期格式（作为备选）
+            r'([0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[\s]+[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2})?)',
+            
+            # 模式 6: 其他日期格式
+            r'([0-9]{4}/[0-9]{1,2}/[0-9]{1,2})',
+            r'([0-9]{4}年[0-9]{1,2}月[0-9]{1,2}日)',
+        ]
+        
+        for pattern_index, pattern in enumerate(expiry_patterns, 1):
+            matches = re.finditer(pattern, html_content, re.IGNORECASE | re.DOTALL)
+            
+            for match in matches:
+                potential_date = match.group(1).strip()
+                
+                # 验证日期格式是否合理
+                if _is_valid_date_format(potential_date):
+                    print(f"📅 从管理界面使用模式 {pattern_index} 提取到期时间: {potential_date}")
+                    return potential_date
+        
+        print(f"⚠️ 未能从管理界面提取到期时间")
+        return None
+        
+    except Exception as error:
+        print(f"⚠️ 从管理界面提取到期时间失败: {error}")
+        return None
 
 
 def _extract_product_name(html_content, product_id):
@@ -287,35 +512,57 @@ def _extract_product_name(html_content, product_id):
             # 模式 1: 产品名称在表格的第一列，管理链接在后面的列
             rf'<td[^>]*>\s*([^<]+?)\s*</td>(?:[\s\S]*?<td[^>]*>){0,3}[\s\S]*?control/detail/{product_id}',
             
-            # 模式 2: 产品名称在 class 包含 "name" 或 "title" 的标签中
+            # 模式 4: 产品名称在 class 包含 "name" 或 "title" 的标签中
             rf'<[^>]+class=["\'][^"\'>]*(?:name|title|product)[^"\'>]*["\'][^>]*>\s*([^<]+?)\s*</[^>]+>[\s\S]*?control/detail/{product_id}',
             
-            # 模式 3: 产品名称在 h3, h4, h5 标题标签中
+            # 模式 5: 产品名称在 h3, h4, h5 标题标签中
             rf'<h[3-5][^>]*>\s*([^<]+?)\s*</h[3-5]>[\s\S]*?control/detail/{product_id}',
             
-            # 模式 4: 产品名称在 strong 或 b 标签中
+            # 模式 6: 产品名称在 strong 或 b 标签中
             rf'<(?:strong|b)[^>]*>\s*([^<]+?)\s*</(?:strong|b)>[\s\S]*?control/detail/{product_id}',
             
-            # 模式 5: 产品名称在第一个 td 中，优先选择非域名内容
+            # 模式 7: 产品名称在第一个 td 中，优先选择非域名内容
             rf'<tr[^>]*>[\s\S]*?<td[^>]*>\s*([^<]+?)\s*</td>[\s\S]*?control/detail/{product_id}',
             
-            # 模式 6: 产品名称在 div 中，但排除包含域名特征的
+            # 模式 8: 产品名称在 div 中，但排除包含域名特征的
             rf'<div[^>]*>\s*([^<]+?)\s*</div>[\s\S]*?control/detail/{product_id}',
             
-            # 模式 7: 从 title 或 alt 属性中提取
+            # 模式 9: 从 title 或 alt 属性中提取
             rf'(?:title|alt)=["\']([^"\'>]+?)["\'][\s\S]*?control/detail/{product_id}',
         ]
         
         for pattern_index, pattern in enumerate(name_patterns, 1):
             matches = re.finditer(pattern, context_html, re.IGNORECASE | re.DOTALL)
             
+            candidates = []  # 收集所有候选名称
             for match in matches:
                 potential_name = match.group(1).strip()
                 
-                # 更严格的产品名称验证
+                # 收集所有有效的候选名称
                 if _is_valid_product_name(potential_name):
-                    print(f"🎯 使用模式 {pattern_index} 提取到产品名称: {potential_name}")
-                    return potential_name
+                    candidates.append((potential_name, pattern_index))
+            
+            # 如果找到候选名称，选择最优的一个
+            if candidates:
+                # 优先选择包含中文的名称
+                chinese_candidates = [c for c in candidates if re.search(r'[\u4e00-\u9fff]', c[0])]
+                if chinese_candidates:
+                    best_name, best_pattern = chinese_candidates[0]
+                    print(f"🎯 使用模式 {best_pattern} 提取到产品名称 (中文优先): {best_name}")
+                    return best_name
+                
+                # 其次选择长度较长且不像域名的名称
+                non_domain_candidates = [c for c in candidates if not _looks_like_domain(c[0])]
+                if non_domain_candidates:
+                    # 按长度排序，选择最长的
+                    best_name, best_pattern = max(non_domain_candidates, key=lambda x: len(x[0]))
+                    print(f"🎯 使用模式 {best_pattern} 提取到产品名称 (非域名优先): {best_name}")
+                    return best_name
+                
+                # 最后选择第一个候选名称
+                best_name, best_pattern = candidates[0]
+                print(f"🎯 使用模式 {best_pattern} 提取到产品名称 (备用): {best_name}")
+                return best_name
         
         print(f"⚠️ 未能提取产品 {product_id} 的有效名称，使用默认名称")
         return default_name
@@ -323,6 +570,46 @@ def _extract_product_name(html_content, product_id):
     except Exception as error:
         print(f"⚠️ 提取产品 {product_id} 名称失败: {error}")
         return default_name
+
+
+def _looks_like_domain(name):
+    """
+    检查名称是否看起来像域名
+    
+    Args:
+        name (str): 待检查的名称
+    
+    Returns:
+        bool: 是否看起来像域名
+    """
+    if not name:
+        return False
+    
+    name = name.strip().lower()
+    
+    # 检查是否包含域名特征
+    domain_indicators = [
+        # 包含顶级域名
+        r'\.(com|org|net|cn|io|co|me|info|biz)\b',
+        # 以 www 开头
+        r'^www\.',
+        # 包含 http/https
+        r'https?://',
+        # 标准域名格式 (字母数字.字母数字.字母)
+        r'^[a-z0-9-]+\.[a-z0-9-]+\.[a-z]{2,}$',
+        # 简单域名格式 (字母数字.字母)
+        r'^[a-z0-9-]+\.[a-z]{2,}$',
+    ]
+    
+    for pattern in domain_indicators:
+        if re.search(pattern, name):
+            return True
+    
+    # 检查是否主要由域名字符组成且包含点
+    if '.' in name and re.match(r'^[a-z0-9.-]+$', name):
+        return True
+    
+    return False
 
 
 def _is_valid_product_name(name):
@@ -342,17 +629,20 @@ def _is_valid_product_name(name):
     if re.match(r'^\s*$', name):
         return False
     
-    # 过滤明显的域名格式
+    # 增强域名过滤：首先使用专门的域名检测函数
+    if _looks_like_domain(name):
+        print(f"🙅 过滤域名格式: {name}")
+        return False
+    
+    # 过滤明显的域名格式（保留原有逻辑作为补充）
     domain_patterns = [
-        r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',  # 标准域名格式
         r'^https?://',  # URL 格式
         r'^www\.',  # www 开头
-        r'\.[a-zA-Z]{2,}$',  # 以顶级域名结尾
     ]
     
     for pattern in domain_patterns:
         if re.search(pattern, name, re.IGNORECASE):
-            print(f"🙅 过滤域名格式: {name}")
+            print(f"🙅 过滤URL格式: {name}")
             return False
     
     # 过滤包含特定关键词的内容
@@ -497,44 +787,8 @@ def _is_valid_date_format(date_str):
                 pass
     
     return False
-    """
-    移除重复的产品（根据产品 ID）
-    
-    Args:
-        products (list): 产品列表
-    
-    Returns:
-        list: 去重后的产品列表
-    """
-    seen_ids = set()
-    unique_products = []
-    
-    for product in products:
-        if product['id'] not in seen_ids:
-            seen_ids.add(product['id'])
-            unique_products.append(product)
-    
-    return unique_products
 
-def _remove_duplicate_products(products):
-    """
-    移除重复的产品（根据产品 ID）
-    
-    Args:
-        products (list): 产品列表
-    
-    Returns:
-        list: 去重后的产品列表
-    """
-    seen_ids = set()
-    unique_products = []
-    
-    for product in products:
-        if product['id'] not in seen_ids:
-            seen_ids.add(product['id'])
-            unique_products.append(product)
-    
-    return unique_products
+# 原 _remove_duplicate_products 函数已在新逻辑中处理，不再需要
 
 def extract_expiry_date(html_content):
     """从产品管理页面提取到期时间"""
@@ -569,16 +823,31 @@ def extract_expiry_date(html_content):
         return None
 
 def renew_product(session, product):
-    """对单个产品进行续期操作"""
+    """
+    对单个产品进行续期操作
+    
+    优化说明：
+    - 产品名称和到期时间都从管理界面获取
+    - 续期后重新从管理界面获取更新的到期时间
+    - 增强日志输出和错误处理
+    
+    Args:
+        session: 已登录的会话对象
+        product: 产品信息字典，包含 id、name、expiry_date 等
+    
+    Returns:
+        dict: 包含 success和expiry_date的结果字典
+    """
     import time
     
     try:
-        print(f"🔄 开始续期: {product['name']}")
+        print(f"🔄 开始续期: {product['name']} (ID: {product['id']})")
+        print(f"📎 产品管理页面: {BASE_URL}/control/detail/{product['id']}/")
         
-        # 使用从列表页面获取的到期时间作为续期前的时间
+        # 使用从管理界面获取的到期时间作为续期前的时间
         old_expiry = product.get('expiry_date')
         if old_expiry:
-            print(f"📅 续期前到期时间: {old_expiry} (从列表页获取)")
+            print(f"📅 续期前到期时间: {old_expiry} (数据来源: 产品管理界面)")
         else:
             print("⚠️ 未获取到续期前的到期时间")
         
@@ -589,28 +858,43 @@ def renew_product(session, product):
         renew_response = session.post(pay_url, timeout=120, proxies=proxy_config)
         
         if renew_response.status_code == 200 and "免费产品已经帮您续期到当前时间的最大续期时间" in renew_response.text:
-            print(f"✅ {product['name']} 续期成功")
+            print(f"✅ {product['name']} 续期操作成功")
+            print(f"🔄 即将从管理界面获取更新后的到期时间...")
             
-            # 续期成功后，重新获取产品列表页面来获取更新后的到期时间
-            new_expiry = _get_updated_expiry_from_list(session, product['id'], old_expiry)
+            # 续期成功后，重新从产品管理界面获取更新后的到期时间
+            new_expiry = _get_updated_expiry_from_manage_page(session, product['id'], old_expiry)
             
             return {'success': True, 'expiry_date': new_expiry}
             
         else:
-            print(f"❌ {product['name']} 续期失败: 状态码 {renew_response.status_code}")
+            print(f"❌ {product['name']} 续期操作失败: 状态码 {renew_response.status_code}")
             if renew_response.status_code == 200:
-                print(f"响应内容片段: {renew_response.text[:200]}...")
+                print(f"🗎 响应内容片段: {renew_response.text[:200]}...")
+            elif renew_response.status_code == 403:
+                print("🔐 可能需要重新登录或会话已过期")
+            elif renew_response.status_code == 404:
+                print("🔍 产品不存在或已被删除")
             
             return {'success': False, 'expiry_date': old_expiry}
             
     except Exception as e:
-        print(f"❌ {product['name']} 续期请求失败: {e}")
+        print(f"❌ {product['name']} 续期请求异常: {e}")
+        if "timeout" in str(e).lower():
+            print("⏰ 请求超时，可能是网络问题")
+        elif "connection" in str(e).lower():
+            print("🌐 连接失败，检查网络或代理设置")
+        
         return {'success': False, 'expiry_date': product.get('expiry_date')}
 
 
-def _get_updated_expiry_from_list(session, product_id, old_expiry):
+def _get_updated_expiry_from_manage_page(session, product_id, old_expiry):
     """
-    从产品列表页面获取续期后的新到期时间
+    从产品管理界面获取续期后的新到期时间
+    
+    优化说明：
+    - 直接从管理界面获取最新数据，更加准确可靠
+    - 增加智能等待策略和错误处理
+    - 更好的日志输出和进度显示
     
     Args:
         session (requests.Session): 会话对象
@@ -621,44 +905,186 @@ def _get_updated_expiry_from_list(session, product_id, old_expiry):
         str: 更新后的到期时间
     """
     print("⏳ 等待服务器更新数据...")
-    time.sleep(3)  # 等待3秒让服务器更新数据
+    time.sleep(3)  # 初始等待，让服务器处理续期操作
     
-    max_retries = 3
+    max_retries = 5  # 增加重试次数以提高成功率
+    retry_delays = [2, 3, 5, 8, 10]  # 递增的等待旴间
+    
     for attempt in range(max_retries):
         try:
-            print(f"🔄 第 {attempt + 1} 次尝试从列表页获取更新后的到期时间...")
+            print(f"🔄 第 {attempt + 1}/{max_retries} 次尝试从管理界面获取更新后的到期时间...")
             
-            # 重新获取产品列表页面
-            response = session.get(PRODUCT_LIST_URL, proxies=proxy_config, timeout=60)
+            manage_url = f"{BASE_URL}/control/detail/{product_id}/"
+            print(f"🌐 请求地址: {manage_url}")
+            
+            # 重新获取产品管理页面，确保获取最新数据
+            response = session.get(
+                manage_url, 
+                proxies=proxy_config, 
+                timeout=60,
+                headers={
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
+            )
             
             if response.status_code == 200:
-                # 从新的页面内容中提取到期旲间
-                new_expiry = _extract_expiry_from_list_page(response.text, product_id)
+                print(f"✅ 成功获取产品管理页面 (响应大小: {len(response.text)} 字符)")
                 
-                if new_expiry and new_expiry != old_expiry:
-                    print(f"✅ 成功获取更新后的到期时间: {new_expiry}")
-                    print(f"🎉 续期成功！到期时间已从 {old_expiry} 更新为 {new_expiry}")
-                    return new_expiry
-                elif new_expiry:
-                    print(f"📅 获取到时间: {new_expiry} (与续期前相同，可能需要等待更新)")
+                # 从新的页面内容中提取到期时间
+                new_expiry = _extract_expiry_from_manage_page(response.text)
+                
+                if new_expiry:
+                    # 检查时间是否真的更新了
+                    if new_expiry != old_expiry:
+                        print(f"✅ 检测到到期时间变化!")
+                        print(f"📅 续期前: {old_expiry}")
+                        print(f"📅 续期后: {new_expiry}")
+                        print(f"🎉 续期成功！从管理界面确认时间已更新")
+                        return new_expiry
+                    else:
+                        print(f"📅 获取到时间: {new_expiry} (与续期前相同)")
+                        if attempt < max_retries - 1:
+                            print(f"⏳ 服务器可能还在更新数据，等待 {retry_delays[attempt]} 秒后重试...")
+                        else:
+                            print(f"⚠️ 经过 {max_retries} 次尝试，时间仍未更新")
+                            print(f"💡 可能原因: 1) 续期未生效 2) 服务器更新延迟 3) 已经是最新时间")
+                            # 即使时间相同，也返回从管理界面获取的时间，确保数据一致性
+                            return new_expiry
                 else:
-                    print("⚠️ 未能从列表页提取到期时间")
+                    print(f"⚠️ 第 {attempt + 1} 次尝试未能从管理界面提取到期时间")
+                    print(f"🔍 产品ID: {product_id} 在页面中可能暂时不可见")
             else:
-                print(f"❌ 获取产品列表页面失败: HTTP {response.status_code}")
+                print(f"❌ 获取产品管理页面失败: HTTP {response.status_code}")
+                if response.status_code == 403:
+                    print(f"🔐 可能需要重新登录或会话已过期")
+                elif response.status_code == 502 or response.status_code == 503:
+                    print(f"🌐 服务器临时不可用，稍后重试")
             
             # 如果不是最后一次尝试，则等待后重试
             if attempt < max_retries - 1:
-                print(f"⏳ 等待2秒后重试...")
-                time.sleep(2)
+                delay = retry_delays[attempt]
+                print(f"⏳ 等待 {delay} 秒后进行第 {attempt + 2} 次尝试...")
+                time.sleep(delay)
                 
         except Exception as error:
-            print(f"❌ 第 {attempt + 1} 次获取到期时间失败: {error}")
+            print(f"❌ 第 {attempt + 1} 次获取到期时间异常: {error}")
+            if "timeout" in str(error).lower():
+                print(f"⏰ 网络超时，可能是网络连接问题")
+            elif "connection" in str(error).lower():
+                print(f"🌐 连接失败，检查网络或代理设置")
+            
             if attempt < max_retries - 1:
-                time.sleep(2)
+                delay = retry_delays[attempt]
+                print(f"⏳ 异常恢复等待 {delay} 秒...")
+                time.sleep(delay)
     
     # 如果所有尝试都失败，返回原有的到期时间
     final_expiry = old_expiry or '未知'
-    print(f"⚠️ 无法从列表页获取更新后的到期时间，使用续期前时间: {final_expiry}")
+    print(f"⚠️ 经过 {max_retries} 次尝试仍无法从管理界面获取更新后的到期时间")
+    print(f"🔄 回退策略: 使用续期前时间 [{final_expiry}]")
+    print(f"💡 建议: 稍后可手动检查产品管理界面确认续期状态")
+    return final_expiry
+
+
+def _get_updated_expiry_from_list(session, product_id, old_expiry):
+    """
+    从产品列表页面获取续期后的新到期时间
+    
+    优化说明：
+    - 增加更智能的等待策略
+    - 改进时间比较逻辑
+    - 增强错误处理和日志输出
+    - 确保从 https://vps.polarbear.nyc.mn/control/index/ 获取最新数据
+    
+    Args:
+        session (requests.Session): 会话对象
+        product_id (str): 产品 ID
+        old_expiry (str): 续期前的到期时间
+    
+    Returns:
+        str: 更新后的到期时间
+    """
+    print("⏳ 等待服务器更新数据...")
+    time.sleep(3)  # 初始等待，让服务器处理续期操作
+    
+    max_retries = 5  # 增加重试次数以提高成功率
+    retry_delays = [2, 3, 5, 8, 10]  # 递增的等待时间
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"🔄 第 {attempt + 1}/{max_retries} 次尝试从列表页获取更新后的到期时间...")
+            print(f"🌐 请求地址: {PRODUCT_LIST_URL}")
+            
+            # 重新获取产品列表页面，确保获取最新数据
+            response = session.get(
+                PRODUCT_LIST_URL, 
+                proxies=proxy_config, 
+                timeout=60,
+                headers={
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ 成功获取产品列表页面 (响应大小: {len(response.text)} 字符)")
+                
+                # 从新的页面内容中提取到期时间
+                new_expiry = _extract_expiry_from_list_page(response.text, product_id)
+                
+                if new_expiry:
+                    # 检查时间是否真的更新了
+                    if new_expiry != old_expiry:
+                        print(f"✅ 检测到到期时间变化!")
+                        print(f"📅 续期前: {old_expiry}")
+                        print(f"📅 续期后: {new_expiry}")
+                        print(f"🎉 续期成功！从列表页面确认时间已更新")
+                        return new_expiry
+                    else:
+                        print(f"📅 获取到时间: {new_expiry} (与续期前相同)")
+                        if attempt < max_retries - 1:
+                            print(f"⏳ 服务器可能还在更新数据，等待 {retry_delays[attempt]} 秒后重试...")
+                        else:
+                            print(f"⚠️ 经过 {max_retries} 次尝试，时间仍未更新")
+                            print(f"💡 可能原因: 1) 续期未生效 2) 服务器更新延迟 3) 已经是最新时间")
+                            # 即使时间相同，也返回从列表页获取的时间，确保数据一致性
+                            return new_expiry
+                else:
+                    print(f"⚠️ 第 {attempt + 1} 次尝试未能从列表页提取到期时间")
+                    print(f"🔍 产品ID: {product_id} 在页面中可能暂时不可见")
+            else:
+                print(f"❌ 获取产品列表页面失败: HTTP {response.status_code}")
+                if response.status_code == 403:
+                    print(f"🔐 可能需要重新登录或会话已过期")
+                elif response.status_code == 502 or response.status_code == 503:
+                    print(f"🌐 服务器临时不可用，稍后重试")
+            
+            # 如果不是最后一次尝试，则等待后重试
+            if attempt < max_retries - 1:
+                delay = retry_delays[attempt]
+                print(f"⏳ 等待 {delay} 秒后进行第 {attempt + 2} 次尝试...")
+                time.sleep(delay)
+                
+        except Exception as error:
+            print(f"❌ 第 {attempt + 1} 次获取到期时间异常: {error}")
+            if "timeout" in str(error).lower():
+                print(f"⏰ 网络超时，可能是网络连接问题")
+            elif "connection" in str(error).lower():
+                print(f"🌐 连接失败，检查网络或代理设置")
+            
+            if attempt < max_retries - 1:
+                delay = retry_delays[attempt]
+                print(f"⏳ 异常恢复等待 {delay} 秒...")
+                time.sleep(delay)
+    
+    # 如果所有尝试都失败，返回原有的到期时间
+    final_expiry = old_expiry or '未知'
+    print(f"⚠️ 经过 {max_retries} 次尝试仍无法从列表页获取更新后的到期时间")
+    print(f"🔄 回退策略: 使用续期前时间 [{final_expiry}]")
+    print(f"💡 建议: 稍后可手动检查产品列表确认续期状态")
     return final_expiry
 
 session = login_to_arcticcloud(LOGIN_URL, username, password)
