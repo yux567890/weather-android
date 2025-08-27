@@ -12,17 +12,11 @@ proxies = {
     "https": socks5_proxy
 } if socks5_proxy else {}
 
-# 加载 ArcticCloud_CONFIG 环境变量
-config = os.environ.get("ArcticCloud_CONFIG", '{"username": "", "password": "", "VPS": {}}')
-try:
-    config = json.loads(config)
-except json.JSONDecodeError as e:
-    raise ValueError(f"解析 'ArcticCloud_CONFIG' 时出错: {str(e)}")
-
-username = config.get('username', '')
-password = config.get('password', '')
+# 获取账号密码环境变量
+username = os.environ.get("ARCTIC_USERNAME", "")
+password = os.environ.get("ARCTIC_PASSWORD", "")
 if not username or not password:
-    print("账号密码不全！退出脚本！")
+    print("账号密码不全！请设置 ARCTIC_USERNAME 和 ARCTIC_PASSWORD 环境变量！退出脚本！")
     exit()
 
 login_url = "https://vps.polarbear.nyc.mn/index/login/?referer=%2Fcontrol%2Findex%2F"
@@ -356,4 +350,4 @@ if session:
     if failed_products:
         print(f"\n❌ 续期失败的产品：")
         for product in failed_products:
-            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
+            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
