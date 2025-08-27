@@ -549,4 +549,4 @@ if session:
     if failed_products:
         print(f"\n❌ 续期失败的产品：")
         for product in failed_products:
-            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
+            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
