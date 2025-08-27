@@ -1,163 +1,362 @@
-# -- coding: utf-8 --
+# -*- coding: utf-8 -*-
+"""
+ArcticCloud VPS 自动续期脚本
+
+功能:
+- 自动登录 ArcticCloud 管理面板
+- 获取所有 VPS 产品列表
+- 自动续期免费 VPS 产品
+- 通过 Telegram 发送续期状态通知
+- 支持 SOCKS5 代理访问
+
+作者: xiong_renew 项目
+版本: 2.0
+"""
+
 import os
 import json
 import re
 import time
 from curl_cffi import requests
 
-# 获取 SOCKS5 代理地址（如：socks5://user:pass@host:port）
-socks5_proxy = os.environ.get("SOCKS5_PROXY", "")
-proxies = {
-    "http": socks5_proxy,
-    "https": socks5_proxy
-} if socks5_proxy else {}
+# =============================================================================
+# 配置部分 - 从环境变量读取配置信息
+# =============================================================================
 
-# 获取账号密码环境变量
+# SOCKS5 代理配置 (可选)
+# 格式: socks5://username:password@host:port
+socks5_proxy_url = os.environ.get("SOCKS5_PROXY", "")
+proxy_config = {
+    "http": socks5_proxy_url,
+    "https": socks5_proxy_url
+} if socks5_proxy_url else {}
+
+if socks5_proxy_url:
+    print(f"🌐 已配置 SOCKS5 代理: {socks5_proxy_url[:20]}...")
+else:
+    print("🌐 未配置代理，使用直连")
+
+# ArcticCloud 账号配置 (必需)
 username = os.environ.get("ARCTIC_USERNAME", "")
 password = os.environ.get("ARCTIC_PASSWORD", "")
+
 if not username or not password:
-    print("账号密码不全！请设置 ARCTIC_USERNAME 和 ARCTIC_PASSWORD 环境变量！退出脚本！")
-    exit()
+    print("❌ 账号密码不全！请设置 ARCTIC_USERNAME 和 ARCTIC_PASSWORD 环境变量！")
+    print("   示例: export ARCTIC_USERNAME='your_username'")
+    print("   示例: export ARCTIC_PASSWORD='your_password'")
+    exit(1)
 
-login_url = "https://vps.polarbear.nyc.mn/index/login/?referer=%2Fcontrol%2Findex%2F"
+print(f"✅ 已加载账号配置: {username[:3]}***")
 
+# ArcticCloud 登录地址
+LOGIN_URL = "https://vps.polarbear.nyc.mn/index/login/?referer=%2Fcontrol%2Findex%2F"
+PRODUCT_LIST_URL = "https://vps.polarbear.nyc.mn/control/index/"
+BASE_URL = "https://vps.polarbear.nyc.mn"
+
+# Telegram 通知配置 (可选)
 telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 chat_id = os.environ.get("CHAT_ID", "")
 thread_id = os.environ.get("THREAD_ID", "")
 telegram_api_url = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org")
 
-def telegram_Bot(token, chat_id, message):
-    url = f'{telegram_api_url}/bot{token}/sendMessage'
-    data = {
+if telegram_bot_token and chat_id:
+    print("✅ 已配置 Telegram 通知")
+else:
+    print("⚠️ 未配置 Telegram 通知，将仅显示控制台输出")
+
+# =============================================================================
+# 工具函数部分
+# =============================================================================
+
+def send_telegram_notification(token, chat_id, message):
+    """
+    发送 Telegram 通知
+    
+    Args:
+        token (str): Telegram Bot Token
+        chat_id (str): 聊天 ID
+        message (str): 要发送的消息
+    
+    Returns:
+        bool: 发送是否成功
+    """
+    if not token or not chat_id:
+        print("⚠️ Telegram 配置不全，跳过发送通知")
+        return False
+    
+    api_url = f'{telegram_api_url}/bot{token}/sendMessage'
+    notification_data = {
         'chat_id': chat_id,
-        'message_thread_id': thread_id,
         'text': message
     }
+    
+    # 如果配置了线程 ID，则添加到请求中
+    if thread_id:
+        notification_data['message_thread_id'] = thread_id
+    
     try:
-        r = requests.post(url, json=data, timeout=30, proxies=proxies)
-        print(f"Telegram推送成功: {r.json().get('ok')}")
-    except Exception as e:
-        print(f"Telegram推送失败: {e}")
+        response = requests.post(
+            api_url, 
+            json=notification_data, 
+            timeout=30, 
+            proxies=proxy_config
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('ok'):
+                print(f"✅ Telegram 通知发送成功")
+                return True
+            else:
+                print(f"❌ Telegram API 返回错误: {result.get('description', '未知错误')}")
+        else:
+            print(f"❌ Telegram 请求失败: HTTP {response.status_code}")
+        
+        return False
+        
+    except Exception as error:
+        print(f"❌ Telegram 通知发送失败: {error}")
+        return False
 
-def session_login(url, username, password):
+def login_to_arcticcloud(login_url, username, password):
+    """
+    登录到 ArcticCloud 管理面板
+    
+    Args:
+        login_url (str): 登录页面地址
+        username (str): 用户名
+        password (str): 密码
+    
+    Returns:
+        requests.Session: 登录成功的会话对象，失败返回 None
+    """
+    print(f"🔑 开始登录 ArcticCloud: {username[:3]}***")
+    
+    # 创建会话对象，模拟 Chrome 浏览器
     session = requests.Session(impersonate="chrome110")
+    
     try:
-        session.get(url, proxies=proxies)
-    except Exception as e:
-        print(f"登录页访问失败: {e}")
+        # 首先访问登录页面获取 Cookies
+        print("🌐 访问登录页面...")
+        session.get(login_url, proxies=proxy_config, timeout=30)
+        
+    except Exception as error:
+        print(f"❌ 登录页访问失败: {error}")
         return None
 
-    data = {"swapname": username, "swappass": password}
-    headers = {
-        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0.0.0 Safari/537.36",
-        'origin': "https://vps.polarbear.nyc.mn/",
-        'referer': url,
+    # 准备登录数据
+    login_data = {
+        "swapname": username,
+        "swappass": password
     }
+    
+    # 设置请求头，模拟真实浏览器
+    request_headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/125.0.0.0 Safari/537.36",
+        'Origin': "https://vps.polarbear.nyc.mn",
+        'Referer': login_url,
+        'Accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        'Accept-Language': "zh-CN,zh;q=0.9,en;q=0.8",
+        'Accept-Encoding': "gzip, deflate, br",
+        'Connection': "keep-alive",
+        'Upgrade-Insecure-Requests': "1"
+    }
+    
     try:
-        response = session.post(url, data=data, headers=headers, proxies=proxies, timeout=60)
-        if response.status_code == 200 and ('欢迎回来' in response.text or '退出登录' in response.text):
-            print("✅ 登录成功")
-            return session
-        print("❌ 登录失败")
-    except Exception as e:
-        print("登录异常:", e)
+        print("🔐 提交登录表单...")
+        response = session.post(
+            login_url, 
+            data=login_data, 
+            headers=request_headers, 
+            proxies=proxy_config, 
+            timeout=60
+        )
+        
+        # 检查登录是否成功
+        if response.status_code == 200:
+            response_text = response.text
+            # 检查登录成功的标志
+            if '欢迎回来' in response_text or '退出登录' in response_text:
+                print("✅ ArcticCloud 登录成功")
+                return session
+            elif '错误' in response_text or '失败' in response_text:
+                print("❌ 登录失败: 用户名或密码错误")
+            else:
+                print("❌ 登录失败: 未知错误")
+        else:
+            print(f"❌ 登录请求失败: HTTP {response.status_code}")
+            
+    except Exception as error:
+        print(f"❌ 登录异常: {error}")
+    
     return None
 
-def parse_product_list(session):
-    """解析产品列表页面，获取产品信息和管理链接"""
+def get_product_list_from_page(session):
+    """
+    从产品列表页面获取所有 VPS 产品信息
+    
+    Args:
+        session (requests.Session): 已登录的会话对象
+    
+    Returns:
+        list: 产品信息列表，每个元素包含 id、name、manage_url
+    """
+    print(f"📋 获取产品列表: {PRODUCT_LIST_URL}")
+    
     try:
-        list_url = "https://vps.polarbear.nyc.mn/control/index/"
-        response = session.get(list_url, proxies=proxies, timeout=60)
+        response = session.get(PRODUCT_LIST_URL, proxies=proxy_config, timeout=60)
         
         if response.status_code != 200:
-            print(f"❌ 获取产品列表失败: 状态码 {response.status_code}")
+            print(f"❌ 获取产品列表失败: HTTP {response.status_code}")
             return []
         
         print("✅ 成功获取产品列表页面")
         
-        products = []
+        # 解析 HTML 内容
         html_content = response.text
+        products = []
         
-        # 尝试多种模式来匹配产品信息
-        # 模式1: 寻找包含产品名称和管理链接的表格行或div块
-        # 常见的HTML结构可能是: <td>产品名称</td>...<a href="/control/detail/123/">管理</a>
-        
-        # 首先提取所有管理链接和对应的产品ID
-        manage_pattern = r'/control/detail/(\d+)/?["\'>]'
-        product_ids = re.findall(manage_pattern, html_content)
+        # 使用正则表达式匹配所有管理链接
+        # 匹配模式: /control/detail/{product_id}/
+        manage_link_pattern = r'/control/detail/(\d+)/?["\'>]'
+        product_ids = re.findall(manage_link_pattern, html_content)
         
         if not product_ids:
-            print("❌ 未找到任何管理链接")
+            print("❌ 未在页面中找到任何产品管理链接")
             return []
         
-        # 为了获取产品名称，我们需要分析HTML结构
-        # 尝试几种常见的模式来匹配产品名称
+        print(f"🔍 找到 {len(product_ids)} 个产品 ID: {product_ids}")
         
-        # 模式1: 表格结构 - 查找包含产品ID的行，然后向前查找产品名称
+        # 为每个产品 ID 提取产品名称
         for product_id in product_ids:
-            product_name = f'VPS_{product_id}'  # 默认名称
+            product_name = _extract_product_name(html_content, product_id)
             
-            # 尝试匹配包含该产品ID的HTML片段
-            id_pattern = rf'control/detail/{product_id}[/"\'>]'
-            match_pos = re.search(id_pattern, html_content)
-            
-            if match_pos:
-                # 获取匹配位置前后的文本片段用于分析
-                start_pos = max(0, match_pos.start() - 500)
-                end_pos = min(len(html_content), match_pos.end() + 100)
-                context = html_content[start_pos:end_pos]
-                
-                # 尝试多种产品名称提取模式
-                name_patterns = [
-                    # 模式1: <td>产品名称</td> ... 管理链接
-                    r'<td[^>]*>([^<]+)</td>[\s\S]*?control/detail/' + product_id,
-                    # 模式2: <div>产品名称</div> ... 管理链接  
-                    r'<div[^>]*>([^<]+)</div>[\s\S]*?control/detail/' + product_id,
-                    # 模式3: <span>产品名称</span> ... 管理链接
-                    r'<span[^>]*>([^<]+)</span>[\s\S]*?control/detail/' + product_id,
-                    # 模式4: 产品名称在管理链接前的任何标签中
-                    r'>([^<>]+)</[^>]*>[\s\S]*?control/detail/' + product_id,
-                    # 模式5: title或alt属性中的产品名称
-                    r'(?:title|alt)=["\']([^"\'>]+)["\'][\s\S]*?control/detail/' + product_id
-                ]
-                
-                for pattern in name_patterns:
-                    name_match = re.search(pattern, context, re.IGNORECASE | re.DOTALL)
-                    if name_match:
-                        potential_name = name_match.group(1).strip()
-                        # 过滤掉明显不是产品名称的内容
-                        if (len(potential_name) > 2 and 
-                            len(potential_name) < 100 and
-                            not re.match(r'^\s*$', potential_name) and
-                            '管理' not in potential_name and
-                            'detail' not in potential_name and
-                            not potential_name.isdigit()):
-                            product_name = potential_name
-                            break
-            
-            products.append({
+            product_info = {
                 'id': product_id,
                 'name': product_name,
-                'manage_url': f'https://vps.polarbear.nyc.mn/control/detail/{product_id}/'
-            })
+                'manage_url': f'{BASE_URL}/control/detail/{product_id}/'
+            }
+            
+            products.append(product_info)
         
-        # 去重处理（根据产品ID）
-        seen_ids = set()
-        unique_products = []
-        for product in products:
-            if product['id'] not in seen_ids:
-                seen_ids.add(product['id'])
-                unique_products.append(product)
+        # 去重处理（根据产品 ID）
+        unique_products = _remove_duplicate_products(products)
         
-        print(f"🔍 找到 {len(unique_products)} 个产品")
+        print(f"🎉 最终获取到 {len(unique_products)} 个唯一产品:")
         for product in unique_products:
-            print(f"  - {product['name']} (ID: {product['id']})")
+            print(f"   • {product['name']} (ID: {product['id']})")
         
         return unique_products
         
-    except Exception as e:
-        print(f"❌ 解析产品列表失败: {e}")
+    except Exception as error:
+        print(f"❌ 解析产品列表失败: {error}")
         return []
+
+
+def _extract_product_name(html_content, product_id):
+    """
+    从 HTML 内容中提取指定产品 ID 的产品名称
+    
+    Args:
+        html_content (str): HTML 页面内容
+        product_id (str): 产品 ID
+    
+    Returns:
+        str: 产品名称，如果无法提取则返回默认名称
+    """
+    default_name = f'VPS_{product_id}'
+    
+    try:
+        # 找到包含该产品 ID 的 HTML 片段
+        id_pattern = rf'control/detail/{product_id}[/"\'>]'
+        match_position = re.search(id_pattern, html_content)
+        
+        if not match_position:
+            return default_name
+        
+        # 获取上下文片段用于分析（前 500 字符，后 100 字符）
+        start_pos = max(0, match_position.start() - 500)
+        end_pos = min(len(html_content), match_position.end() + 100)
+        context_html = html_content[start_pos:end_pos]
+        
+        # 尝试多种模式来匹配产品名称
+        name_patterns = [
+            # 模式 1: <td>产品名称</td> ... 管理链接
+            rf'<td[^>]*>([^<]+)</td>[\s\S]*?control/detail/{product_id}',
+            # 模式 2: <div>产品名称</div> ... 管理链接
+            rf'<div[^>]*>([^<]+)</div>[\s\S]*?control/detail/{product_id}',
+            # 模式 3: <span>产品名称</span> ... 管理链接
+            rf'<span[^>]*>([^<]+)</span>[\s\S]*?control/detail/{product_id}',
+            # 模式 4: 任意标签中的内容 ... 管理链接
+            rf'>([^<>]+)</[^>]*>[\s\S]*?control/detail/{product_id}',
+            # 模式 5: title 或 alt 属性中的内容
+            rf'(?:title|alt)=["\']([^"\'>]+)["\'][\s\S]*?control/detail/{product_id}'
+        ]
+        
+        for pattern in name_patterns:
+            name_match = re.search(pattern, context_html, re.IGNORECASE | re.DOTALL)
+            if name_match:
+                potential_name = name_match.group(1).strip()
+                
+                # 过滤掉不合理的内容
+                if _is_valid_product_name(potential_name):
+                    return potential_name
+        
+        return default_name
+        
+    except Exception as error:
+        print(f"⚠️ 提取产品 {product_id} 名称失败: {error}")
+        return default_name
+
+
+def _is_valid_product_name(name):
+    """
+    验证产品名称是否有效
+    
+    Args:
+        name (str): 待验证的产品名称
+    
+    Returns:
+        bool: 是否为有效的产品名称
+    """
+    if not name or len(name) < 2 or len(name) > 100:
+        return False
+    
+    # 过滤空白字符
+    if re.match(r'^\s*$', name):
+        return False
+    
+    # 过滤包含特定关键词的内容
+    invalid_keywords = ['管理', 'detail', 'control']
+    if any(keyword in name for keyword in invalid_keywords):
+        return False
+    
+    # 过滤纯数字
+    if name.isdigit():
+        return False
+    
+    return True
+
+
+def _remove_duplicate_products(products):
+    """
+    移除重复的产品（根据产品 ID）
+    
+    Args:
+        products (list): 产品列表
+    
+    Returns:
+        list: 去重后的产品列表
+    """
+    seen_ids = set()
+    unique_products = []
+    
+    for product in products:
+        if product['id'] not in seen_ids:
+            seen_ids.add(product['id'])
+            unique_products.append(product)
+    
+    return unique_products
 
 def extract_expiry_date(html_content):
     """从产品管理页面提取到期时间"""
@@ -199,7 +398,7 @@ def renew_product(session, product):
         print(f"🔄 开始续期: {product['name']}")
         
         # 首先访问产品管理页面
-        manage_response = session.get(product['manage_url'], proxies=proxies, timeout=60)
+        manage_response = session.get(product['manage_url'], proxies=proxy_config, timeout=60)
         if manage_response.status_code != 200:
             print(f"❌ 访问管理页面失败: 状态码 {manage_response.status_code}")
             return {'success': False, 'expiry_date': None}
@@ -212,8 +411,8 @@ def renew_product(session, product):
             print(f"📅 续期前到期时间: {old_expiry}")
         
         # 执行续期操作
-        pay_url = f"https://vps.polarbear.nyc.mn/control/detail/{product['id']}/pay/"
-        renew_response = session.post(pay_url, timeout=120, proxies=proxies)
+        pay_url = f"{BASE_URL}/control/detail/{product['id']}/pay/"
+        renew_response = session.post(pay_url, timeout=120, proxies=proxy_config)
         
         if renew_response.status_code == 200 and "免费产品已经帮您续期到当前时间的最大续期时间" in renew_response.text:
             print(f"✅ {product['name']} 续期成功")
@@ -229,7 +428,7 @@ def renew_product(session, product):
             for attempt in range(max_retries):
                 try:
                     print(f"🔄 第{attempt + 1}次尝试获取更新后的到期时间...")
-                    updated_response = session.get(product['manage_url'], proxies=proxies, timeout=60)
+                    updated_response = session.get(product['manage_url'], proxies=proxy_config, timeout=60)
                     
                     if updated_response.status_code == 200:
                         new_expiry = extract_expiry_date(updated_response.text)
@@ -275,16 +474,16 @@ def renew_product(session, product):
         print(f"❌ {product['name']} 续期请求失败: {e}")
         return {'success': False, 'expiry_date': None}
 
-session = session_login(login_url, username, password)
+session = login_to_arcticcloud(LOGIN_URL, username, password)
 
 if session:
     # 获取产品列表
-    products = parse_product_list(session)
+    products = get_product_list_from_page(session)
     
     if not products:
         print("❌ 未找到任何产品，退出脚本")
         if telegram_bot_token and chat_id:
-            telegram_Bot(telegram_bot_token, chat_id, "ArcticCloud VPS续期提醒：\n\n❌未找到任何产品！😭")
+            send_telegram_notification(telegram_bot_token, chat_id, "ArcticCloud VPS续期提醒：\n\n❌未找到任何产品！😭")
         exit()
     
     # 对每个产品进行续期
@@ -305,7 +504,7 @@ if session:
             # 单个产品成功通知
             expiry_info = f"\n📅 到期时间: {result['expiry_date']}" if result['expiry_date'] else ""
             if telegram_bot_token and chat_id:
-                telegram_Bot(telegram_bot_token, chat_id, f"ArcticCloud VPS续期提醒：\n\n✅{product['name']}已成功续期7天！😋{expiry_info}")
+                send_telegram_notification(telegram_bot_token, chat_id, f"ArcticCloud VPS续期提醒：\n\n✅{product['name']}已成功续期7天！😋{expiry_info}")
         else:
             fail_count += 1
             failed_products.append({
@@ -316,7 +515,7 @@ if session:
             # 单个产品失败通知
             expiry_info = f"\n📅 当前到期时间: {result['expiry_date']}" if result['expiry_date'] else ""
             if telegram_bot_token and chat_id:
-                telegram_Bot(telegram_bot_token, chat_id, f"ArcticCloud VPS续期提醒：\n\n❌{product['name']}续期失败！😭{expiry_info}")
+                send_telegram_notification(telegram_bot_token, chat_id, f"ArcticCloud VPS续期提醒：\n\n❌{product['name']}续期失败！😭{expiry_info}")
     
     # 发送汇总通知
     if telegram_bot_token and chat_id:
@@ -334,7 +533,7 @@ if session:
             for i, product in enumerate(failed_products, 1):
                 summary_message += f"{i}. {product['name']}\n   📅 当前到期: {product['expiry_date']}\n"
         
-        telegram_Bot(telegram_bot_token, chat_id, summary_message)
+        send_telegram_notification(telegram_bot_token, chat_id, summary_message)
     
     print(f"\n📊 续期完成汇总：")
     print(f"   总计: {len(products)} 个产品")
