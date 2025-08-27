@@ -55,7 +55,7 @@ BASE_URL = "https://vps.polarbear.nyc.mn"
 
 # Telegram 通知配置 (可选)
 telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-chat_id = os.environ.get("CHAT_ID", "")
+chat_id = os.environ.get("TG_CHAT_ID", "")
 thread_id = os.environ.get("THREAD_ID", "")
 telegram_api_url = os.environ.get("TELEGRAM_API_URL", "https://api.telegram.org")
 
@@ -549,4 +549,4 @@ if session:
     if failed_products:
         print(f"\n❌ 续期失败的产品：")
         for product in failed_products:
-            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
+            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")            print(f"   - {product['name']} (当前到期: {product['expiry_date']})")
