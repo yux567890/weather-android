@@ -168,7 +168,24 @@ def get_product_list_from_page(session):
             product_id = match.group(2)
             product_ids.append(product_id)
             manage_urls.append(full_href)
-            print(f"✅ 找到管理按钮: 产品ID {product_id}, URL: {full_href}")
+            # 提取产品名称：查找包含此管理按钮的<tr>元素，然后获取第2个<td>元素的文本
+            product_name = "未知产品"
+            # 查找包含此管理按钮的<tr>元素
+            tr_start_pos = html_content.rfind('<tr', 0, match.start())
+            tr_end_pos = html_content.find('</tr>', match.end())
+            if tr_start_pos != -1 and tr_end_pos != -1:
+                tr_content = html_content[tr_start_pos:tr_end_pos+5]
+                # 查找所有的<td>元素
+                td_matches = re.findall(r'<td[^>]*>(.*?)</td>', tr_content, re.DOTALL)
+                # 获取第2个<td>元素的文本（索引为1）
+                if len(td_matches) >= 2:
+                    # 移除HTML标签并清理空白字符
+                    product_name = re.sub(r'<[^>]+>', '', td_matches[1]).strip()
+                    # 如果清理后为空，则使用原始内容
+                    if not product_name:
+                        product_name = td_matches[1].strip()
+            
+            print(f"✅ 找到管理按钮: 产品ID {product_id}, 产品名称 {product_name}, URL: {full_href}")
         
         if not product_ids:
             fallback_pattern = r'href=["\']([^"\'>]*control/detail/(\d+)[^"\'>]*)["\']'
