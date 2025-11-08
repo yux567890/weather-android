@@ -162,6 +162,7 @@ def get_product_list_from_page(session):
         
         product_ids = []
         manage_urls = []
+        product_names = []  # 用于存储产品名称
         
         for match in matches:
             full_href = match.group(1)
@@ -185,6 +186,7 @@ def get_product_list_from_page(session):
                     if not product_name:
                         product_name = td_matches[1].strip()
             
+            product_names.append(product_name)  # 保存产品名称
             print(f"✅ 找到管理按钮: 产品ID {product_id}, 产品名称 {product_name}, URL: {full_href}")
         
         if not product_ids:
@@ -196,6 +198,7 @@ def get_product_list_from_page(session):
                 product_id = match.group(2)
                 product_ids.append(product_id)
                 manage_urls.append(full_href)
+                product_names.append("未知产品")  # 为备用方案也添加产品名称
                 print(f"⚠️ 备用方案找到: 产品ID {product_id}, URL: {full_href}")
         
         if not product_ids:
@@ -205,20 +208,23 @@ def get_product_list_from_page(session):
         unique_product_ids = list(set(product_ids))
         
         product_url_map = {}
+        product_name_map = {}  # 用于存储产品ID到产品名称的映射
         for i, product_id in enumerate(product_ids):
             if product_id not in product_url_map:
                 full_url = manage_urls[i]
                 if not full_url.startswith('http'):
                     full_url = BASE_URL + ('' if full_url.startswith('/') else '/') + full_url
                 product_url_map[product_id] = full_url
+                product_name_map[product_id] = product_names[i]  # 保存产品名称映射
         
         products = []
         
         for product_id in unique_product_ids:
             manage_url = product_url_map.get(product_id, f'{BASE_URL}/control/detail/{product_id}/')
+            product_name = product_name_map.get(product_id, f'VPS_{product_id}')  # 获取产品名称
             product_info = {
                 'id': product_id,
-                'name': f'VPS_{product_id}',
+                'name': product_name,  # 使用提取到的产品名称
                 'manage_url': manage_url,
                 'expiry_date': None
             }
@@ -226,110 +232,13 @@ def get_product_list_from_page(session):
         
         print(f"\n🎉 最终获取到 {len(products)} 个产品:")
         for product in products:
-            print(f"   • 产品ID: {product['id']}, 管理URL: {product['manage_url']}")
+            print(f"   • 产品ID: {product['id']}, 产品名称: {product['name']}, 管理URL: {product['manage_url']}")
         
         return products
         
     except Exception as error:
         print(f"❌ 解析产品列表失败: {error}")
         return []
-
-def _extract_product_name_from_manage_page(html_content, product_id):
-    """从产品管理界面提取产品名称"""
-    default_name = f'VPS_{product_id}'
-    
-    try:
-        print(f"🔍 正在从管理界面 control/detail/{product_id}/ 提取产品名称...")
-        
-        name_patterns = [
-            r'<li[^>]*class=["\'][^"\'>]*list-group-item[^"\'>]*["\'][^>]*>[\s\S]*?产品名称[\s\S]*?([A-Za-z0-9][A-Za-z0-9\-_\.]*[A-Za-z0-9])[\s\S]*?</li>',
-        ]
-        
-        candidates = []
-        
-        for pattern_index, pattern in enumerate(name_patterns, 1):
-            matches = re.finditer(pattern, html_content, re.IGNORECASE | re.DOTALL)
-            
-            for match in matches:
-                potential_name = match.group(1).strip()
-                
-                if _is_valid_product_name_for_manage_page(potential_name):
-                    candidates.append((potential_name, pattern_index))
-        
-        if candidates:
-            best_name, best_pattern = candidates[0]
-            print(f"🎯 从管理界面使用模式 {best_pattern} 提取到产品名称: {best_name}")
-            return best_name
-        
-        print(f"⚠️ 未能从管理界面提取产品 {product_id} 的有效名称，使用默认名称")
-        return default_name
-        
-    except Exception as error:
-        print(f"⚠️ 从管理界面提取产品 {product_id} 名称失败: {error}")
-        return default_name
-
-
-def _is_valid_product_name_for_manage_page(name):
-    """验证从管理界面提取的产品名称是否有效"""
-    if not name or len(name) < 1 or len(name) > 300:
-        return False
-    
-    name = name.strip()
-    if not name:
-        return False
-    
-    if re.match(r'^\s*$', name) or re.match(r'^[\s\-_\.]+$', name):
-        return False
-    
-    if _looks_like_domain(name):
-        print(f"🙅 过滤域名格式: {name}")
-        return False
-    
-    if '<' in name and '>' in name:
-        print(f"🙅 过滤HTML标签: {name}")
-        return False
-    
-    strict_invalid_keywords = [
-        'control', 'detail', 'manage'
-    ]
-    
-    name_lower = name.lower()
-    
-    if name_lower in strict_invalid_keywords:
-        print(f"🙅 过滤管理关键词: {name}")
-        return False
-    
-    suspicious_patterns = [
-        r'^(control|detail|manage)\s*$',
-        r'^\s*(edit|delete|add|new)\s*$',
-        r'^\s*https?://',
-        r'^\s*www\.',
-    ]
-    
-    for pattern in suspicious_patterns:
-        if re.match(pattern, name_lower):
-            print(f"🙅 过滤可疑模式: {name}")
-            return False
-    
-    if name.isdigit():
-        print(f"🙅 过滤纯数字: {name}")
-        return False
-        
-    if re.match(r'^[^a-zA-Z\u4e00-\u9fff]+$', name):
-        print(f"🙅 过滤纯特殊字符: {name}")
-        return False
-    
-    if len(name) < 2:
-        print(f"🙅 过滤过短内容: {name}")
-        return False
-        
-    if not re.search(r'[\u4e00-\u9fff]', name) and len(name) < 3:
-        print(f"🙅 过滤过短英文: {name}")
-        return False
-    
-    print(f"✅ 接受产品名称: {name}")
-    return True
-
 
 def _extract_expiry_from_manage_page(html_content):
     """从产品管理界面提取到期时间"""
@@ -352,32 +261,6 @@ def _extract_expiry_from_manage_page(html_content):
     except Exception as error:
         print(f"⚠️ 从管理界面提取到期时间失败: {error}")
         return None
-
-
-def _looks_like_domain(name):
-    """检查名称是否看起来像域名"""
-    if not name:
-        return False
-    
-    name = name.strip().lower()
-    
-    domain_indicators = [
-        r'\.(com|org|net|cn|io|co|me|info|biz)\b',
-        r'^www\.',
-        r'https?://',
-        r'^[a-z0-9-]+\.[a-z0-9-]+\.[a-z]{2,}$',
-        r'^[a-z0-9-]+\.[a-z]{2,}$',
-    ]
-    
-    for pattern in domain_indicators:
-        if re.search(pattern, name):
-            return True
-    
-    if '.' in name and re.match(r'^[a-z0-9.-]+$', name):
-        return True
-    
-    return False
-
 
 def _is_valid_date_format(date_str):
     """验证日期格式是否合理"""
@@ -419,10 +302,11 @@ def renew_product(session, product):
             if response.status_code == 200:
                 html_content = response.text
                 
-                actual_product_name = _extract_product_name_from_manage_page(html_content, product_id)
+                # 直接使用从产品列表页面获取的产品名称，不再从管理页面重新获取
+                actual_product_name = product.get('name', f'VPS_{product_id}')
                 old_expiry = _extract_expiry_from_manage_page(html_content)
                 
-                product['name'] = actual_product_name
+                # 不再更新产品名称，只保留到期时间
                 product['expiry_date'] = old_expiry
                 
             else:
