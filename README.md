@@ -1,6 +1,6 @@
-# 🐧 ArcticCloud VPS 自动续期脚本
+# 🐧 账号自动续期脚本
 
-本项目基于 GitHub Actions 实现对 [ArcticCloud](https://vps.polarbear.nyc.mn)（又名 PolarBear VPS）账户中 VPS 的自动续期功能，支持：
+本项目基于 GitHub Actions 实现对账号自动续期功能，支持：
 
 - ✅ 定时续期（每 3 天自动运行）
 - ✅ Telegram 通知推送（成功或失败都通知）
@@ -22,8 +22,8 @@
 
 | 变量名 | 是否必填 | 用途说明 |
 |--------|----------|-----------|
-| `ARCTIC_USERNAME` | ✅ 必填 | VPS 登录账号 |
-| `ARCTIC_PASSWORD` | ✅ 必填 | VPS 登录密码 |
+| `ARCTIC_USERNAME` | ✅ 必填 | 登录账号 |
+| `ARCTIC_PASSWORD` | ✅ 必填 | 登录密码 |
 | `TELEGRAM_BOT_TOKEN` | ✅ 推荐 | 用于发送 Telegram 通知的 Bot Token |
 | `TG_CHAT_ID` | ✅ 推荐 | Telegram 你的账号或频道的 chat_id |
 | `SOCKS5_PROXY` | ✅ 推荐 | 使用 SOCKS5 代理访问网站（格式见下） |
