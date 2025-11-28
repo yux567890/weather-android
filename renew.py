@@ -2,7 +2,6 @@
 """
 ArcticCloud VPS 自动续期脚本
 """
-
 import os
 import re
 import time
