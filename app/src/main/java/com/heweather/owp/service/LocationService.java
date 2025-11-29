@@ -17,6 +17,7 @@ public class LocationService extends Service {
 
     private final String TAG = "sky";
 
+    
     //声明AMapLocationClient类对象
     public AMapLocationClient mLocationClient = null;
     //声明定位回调监听器
