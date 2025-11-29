@@ -44,7 +44,6 @@ echo Please set the JAVA_HOME variable in your environment to match the
 echo location of your Java installation.
 
 goto fail
-
 :init
 @rem Get command-line arguments, handling Windows variants
 
