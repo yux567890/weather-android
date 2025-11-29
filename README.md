@@ -31,7 +31,7 @@ To install and run this application:
 
 ## Screenshots
 
-![homepage](https://github.com/yux567890/weather-android/raw/master/screenshots-for-readme/owpa1.jpg) ![2nd](https://github.com/yux567890/weather-android/blob/master/screenshots-for-readme/owpa2.jpg?raw=true)
+![homepage](https://github.com/yux567890/weather-android/blob/main/screenshots-for-readme/owpa1.jpg?raw=true) ![2nd](https://github.com/yux567890/weather-android/blob/main/screenshots-for-readme/owpa2.jpg?raw=true)
 
 ![city search](https://raw.githubusercontent.com/yux567890/weather-android/master/screenshots-for-readme/owpa3.jpg) ![setting](https://raw.githubusercontent.com/yux567890/weather-android/master/screenshots-for-readme/owpa4.jpg)
 
