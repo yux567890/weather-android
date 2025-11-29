@@ -1,10 +1,10 @@
-# weatherPlus-Android
+# weather-Android
 
 An open-source weather application for Android.
 
 ## Overview
 
-WeatherPlus-Android is a comprehensive weather application designed for Android devices. This app provides users with accurate and up-to-date weather information, forecasts, and related data through an intuitive and user-friendly interface.
+Weather-Android is a comprehensive weather application designed for Android devices. This app provides users with accurate and up-to-date weather information, forecasts, and related data through an intuitive and user-friendly interface.
 
 ## Features
 
